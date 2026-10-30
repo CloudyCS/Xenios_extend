@@ -309,6 +309,7 @@ static bool xe_clear_all_shader_caches(uintmax_t* removed_out, std::error_code* 
 - (void)finishJITAcquiredPendingLaunchWithQueuedPath:(const std::filesystem::path&)queuedPath
                                        persistedPath:(const std::filesystem::path&)persistedPath;
 - (BOOL)consumePendingStikDebugAutomationPrompt;
+- (void)tempStartAutolaunchPolling;
 - (void)presentStikDebugAutomationPromptWithCompletion:(void (^)(void))completion;
 - (void)setTouchLayoutEditModeActive:(BOOL)active animated:(BOOL)animated;
 - (void)finishTouchLayoutEditMode;
@@ -605,6 +606,68 @@ static bool xe_clear_all_shader_caches(uintmax_t* removed_out, std::error_code* 
   xe_request_current_orientation(self);
   [self presentPendingTouchLayoutInstallIfReady];
   [self.zarConversionCoordinator checkPendingConversionOnLaunch];
+  [self tempStartAutolaunchPolling];
+}
+
+// TEMP: profiling autolaunch. Documents/temp_autolaunch.txt names a game path
+// relative to Documents. Waits for JIT (StikDebug relaunches the app) and the
+// app context, then launches it like a tap in the library would.
+- (void)tempStartAutolaunchPolling {
+  static BOOL started = NO;
+  if (started) {
+    return;
+  }
+  started = YES;
+  NSArray* docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+  if (docs.count == 0) {
+    return;
+  }
+  NSString* relative = [NSString
+      stringWithContentsOfFile:[docs[0] stringByAppendingPathComponent:@"temp_autolaunch.txt"]
+                      encoding:NSUTF8StringEncoding
+                         error:nil];
+  relative =
+      [relative stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  // A path pasted from Files or a chat can carry invisible bidirectional marks.
+  relative = [[relative componentsSeparatedByCharactersInSet:[NSCharacterSet controlCharacterSet]]
+      componentsJoinedByString:@""];
+  if (relative.length == 0) {
+    return;
+  }
+  std::filesystem::path target =
+      std::filesystem::path([[docs[0] stringByAppendingPathComponent:relative] UTF8String]);
+  std::error_code exists_error;
+  if (!std::filesystem::exists(target, exists_error)) {
+    XELOGE("iOS: TEMP autolaunch target doesn't exist: {}", target.string());
+    return;
+  }
+  XELOGI("iOS: TEMP autolaunch waiting for JIT and the app context: {}", target.string());
+  __block int attempts = 0;
+  // The root view controller lives as long as the app.
+  XeniaViewController* strong_self = self;
+  __block void (^poll)(void);
+  poll = [^{
+    if (++attempts > 120) {
+      poll = nil;
+      return;
+    }
+    const BOOL jit = strong_self.jitAcquired || xe_check_jit_available();
+    if (jit && strong_self.appContext) {
+      if (!strong_self.jitAcquired) {
+        [strong_self onJITAcquired];
+      }
+      XELOGI("iOS: TEMP autolaunch launching {}", target.string());
+      [strong_self launchGameAtPath:target
+                        displayName:@"autolaunch"
+       skipMemoryEntitlementWarning:YES];
+      poll = nil;
+      return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, int64_t(NSEC_PER_SEC / 2)),
+                   dispatch_get_main_queue(), poll);
+  } copy];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, int64_t(NSEC_PER_SEC)),
+                 dispatch_get_main_queue(), poll);
 }
 
 - (void)startUpdateCheckIfNeeded {
