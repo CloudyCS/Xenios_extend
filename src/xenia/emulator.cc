@@ -1961,6 +1961,33 @@ const std::filesystem::path Emulator::GetNewDiscPath(
     }
   }
 
+#if XE_PLATFORM_IOS
+  // TEMP: live profiling. The disc swap dialog takes no touch input on iOS,
+  // so take the one saved disc other than the current one.
+  if (saved_discs.size() == 2 && !initial_dir.empty()) {
+    for (const auto& disc : saved_discs) {
+      if (disc.path.parent_path().filename() != initial_dir.filename()) {
+        // A second disc can lack Default.xex; mount through any executable
+        // in its root (the mount takes the parent directory).
+        std::filesystem::path pick = disc.path;
+        std::error_code ec;
+        if (!std::filesystem::exists(pick, ec)) {
+          for (const auto& entry : std::filesystem::directory_iterator(
+                   disc.path.parent_path(), ec)) {
+            if (entry.path().extension() == ".xex") {
+              pick = entry.path();
+              break;
+            }
+          }
+        }
+        XELOGI("GetNewDiscPath: TEMP iOS auto-selected the other disc: {}",
+               xe::strip_pii(xe::path_to_utf8(pick)));
+        return pick;
+      }
+    }
+  }
+#endif
+
   // Check if we need to show the disc selection dialog
   bool show_error = window_message.find("ERROR:") != std::string::npos;
   bool use_file_picker = false;
