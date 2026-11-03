@@ -1,0 +1,58 @@
+# XeniOS diagnostics Worker. Copy to wrangler.toml, fill in the database ID
+# wrangler prints when it creates the database, and keep the copy out of git
+# (it names your account's resources). Secrets go in with
+# `wrangler secret put`, never in this file:
+#   ATTESTATION_KEY  the HMAC key tools/build_apple_release.sh signs builds with
+#   GITHUB_TOKEN     optional: fine-grained token, Issues read/write on GITHUB_REPO only
+#
+# Everything here fits the Workers Free plan, which stops at its limits
+# instead of billing: D1 only (no R2), and a cron that counts its subrequests.
+
+name = "xenios-diagnostics"
+main = "worker/index.mjs"
+compatibility_date = "2026-10-01"
+# https://xenios-diagnostics.<subdomain>.workers.dev. xenios.jp's DNS isn't on
+# Cloudflare, so there's no custom domain; the dashboard checks the Access
+# token itself, so it stays closed here until Access is set up.
+workers_dev = true
+preview_urls = false
+
+# No Workers Logs: they would keep request details, client IPs included. The
+# Worker uses the IP for the rate limit only and stores nothing that names it.
+[observability]
+enabled = false
+
+# Schema: schema.sql (`wrangler d1 execute xenios-diagnostics --remote --file schema.sql`).
+# Records, their raw copies and the release symbol maps; the cron deletes raw
+# rows after 90 days.
+[[d1_databases]]
+binding = "DB"
+database_name = "xenios-diagnostics"
+database_id = "<from wrangler d1 create>"
+
+# Per client IP; the IP is used for this only and never stored.
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }
+
+[vars]
+# Triage issues go to this private repository when GITHUB_TOKEN is set;
+# without it the cron keeps issue drafts in D1 instead.
+# GITHUB_REPO = "<owner>/<private-repo>"
+# The dashboard and /v1/stats answer only requests that carry a valid
+# Cloudflare Access token for this application, and 403 without these. Turn on
+# Access for the workers.dev route (Workers > xenios-diagnostics > Settings >
+# Domains & Routes), leave /v1/diag public, and copy its team domain and
+# audience tag here.
+# ACCESS_TEAM_DOMAIN = "https://<team>.cloudflareaccess.com"
+# ACCESS_AUD = "<the application's audience tag>"
+
+# Every 15 minutes: roll up yesterday and today, look up game names, delete
+# raw rows past 90 days, symbolicate and group new crashes, sync triage issues.
+[triggers]
+crons = ["2,17,32,47 * * * *"]
+
+# The app's endpoint is https://<host>/v1/diag: pass it to
+# tools/build_apple_release.sh --diagnostics-url (or XENIOS_DIAGNOSTICS_URL),
+# which stamps XeniOSDiagnosticsURL into the app. Without it nothing is sent.
