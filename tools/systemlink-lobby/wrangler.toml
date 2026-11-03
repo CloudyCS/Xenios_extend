@@ -1,0 +1,44 @@
+name = "xenios-systemlink"
+main = "src/index.ts"
+compatibility_date = "2026-08-08"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[durable_objects.bindings]]
+name = "DIRECTORY"
+class_name = "Directory"
+
+[[durable_objects.bindings]]
+name = "TURN"
+class_name = "Turn"
+
+# SQLite-backed Durable Objects are what the Workers Free plan allows.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Directory"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["Turn"]
+
+[vars]
+TURN_API_BASE = "https://rtc.live.cloudflare.com"
+# TURN credentials stop once the account's TURN traffic over the last 31 days reaches this many
+# GB (1,000 GB a month are free), and at most TURN_MAX_LIVE are live at once, TURN_MAX_PER_IP
+# to one address.
+TURN_CAP_GB = "400"
+TURN_MAX_LIVE = "32"
+TURN_MAX_PER_IP = "4"
+
+# TURN_KEY_ID and TURN_KEY_API_TOKEN are secrets, set with
+# `npx wrangler secret put TURN_KEY_ID` and `npx wrangler secret put TURN_KEY_API_TOKEN`.
+# Without them the lobby still works and hands out STUN only.
+# CF_ACCOUNT_ID and CF_ANALYTICS_TOKEN (an API token with Account Analytics: Read) let the
+# Worker read its TURN usage. Without them, or while the usage can't be read, it hands out STUN
+# only, so TURN can't run up a bill.
