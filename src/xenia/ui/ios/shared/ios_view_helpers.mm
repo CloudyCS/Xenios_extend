@@ -188,8 +188,12 @@ UIVisualEffectView* xe_install_chrome_backdrop(UIView* host, UIVisualEffect* eff
 }  // namespace
 
 UIVisualEffect* xe_make_chrome_visual_effect(BOOL clear_variant) {
-  UIGlassEffectStyle style = clear_variant ? UIGlassEffectStyleClear : UIGlassEffectStyleRegular;
-  return [UIGlassEffect effectWithStyle:style];
+  if (@available(iOS 26.0, *)) {
+    UIGlassEffectStyle style = clear_variant ? UIGlassEffectStyleClear : UIGlassEffectStyleRegular;
+    return [UIGlassEffect effectWithStyle:style];
+  }
+  return [UIBlurEffect effectWithStyle:clear_variant ? UIBlurEffectStyleSystemUltraThinMaterial
+                                                   : UIBlurEffectStyleSystemMaterial];
 }
 
 void xe_apply_floating_window_chrome(UIView* view) {

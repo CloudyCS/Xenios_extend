@@ -28,6 +28,14 @@ set_target_properties(xenia-app PROPERTIES
   XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
   XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS
     "${_xe_ios_entitlements}")
+option(XENIA_IOS_DISABLE_CODE_SIGNING
+       "Disable Xcode app-target signing (the unsigned IPA target is not signed)"
+       OFF)
+if(XENIA_IOS_DISABLE_CODE_SIGNING)
+  set_target_properties(xenia-app PROPERTIES
+    XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO
+    XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "")
+endif()
 target_sources(xenia-app PRIVATE "${_xe_ios_entitlements}")
 target_compile_definitions(xenia-app PRIVATE
   XBYAK_NO_OP_NAMES
@@ -142,7 +150,19 @@ add_custom_command(TARGET xenia-app POST_BUILD
 # The crash reporter extension (iOS 27): the system runs it after XeniOS
 # crashes, and it reads xe_ios_crash_context from the crashed process. It goes in
 # Extensions/, where iOS 26 ignores it; packaging signs it apart from the app.
-option(XENIA_IOS_CRASH_REPORTER "Embed the iOS 27 crash reporter extension" ON)
+# The extension currently requires iOS 27 and is unsupported by LiveContainer.
+# Enable it by default only when the app itself targets iOS 27 or later.
+set(_xe_ios_crash_reporter_default OFF)
+if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_GREATER_EQUAL 27.0)
+  set(_xe_ios_crash_reporter_default ON)
+endif()
+option(XENIA_IOS_CRASH_REPORTER "Embed the iOS 27 crash reporter extension"
+       ${_xe_ios_crash_reporter_default})
+if(XENIA_IOS_CRASH_REPORTER AND
+   CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS 27.0)
+  message(FATAL_ERROR
+    "XENIA_IOS_CRASH_REPORTER requires an iOS 27.0 or later deployment target.")
+endif()
 if(XENIA_IOS_CRASH_REPORTER)
   execute_process(COMMAND xcrun --sdk iphoneos --show-sdk-path
     OUTPUT_VARIABLE _xe_ios_sdk OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -201,6 +221,14 @@ add_custom_target(xenia-app-ios-package
   COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/build/merge_ios_assets.py"
     "${_xe_ios_assets}" "$<TARGET_BUNDLE_DIR:xenia-app>"
   COMMAND ${_xe_ios_package_command}
+  DEPENDS xenia-app
+  VERBATIM)
+# An unsigned archive for sideloading workflows. It only creates the IPA
+# container; it does not sign the app, its frameworks, or grant entitlements.
+add_custom_target(xenia-app-ios-unsigned-package
+  COMMAND /bin/bash "${PROJECT_SOURCE_DIR}/tools/package_ios_ipa_unsigned.sh"
+    "$<TARGET_BUNDLE_DIR:xenia-app>"
+    "${CMAKE_BINARY_DIR}/XeniOS-unsigned.ipa"
   DEPENDS xenia-app
   VERBATIM)
 xe_target_defaults(xenia-app)

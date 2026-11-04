@@ -125,9 +125,12 @@ constexpr CGFloat kMaxFontSize = 17.0;
 // Always dark, like the system's Game Mode banner, and tinted so the text keeps
 // WCAG AA contrast (4.5:1) even over a white frame.
 UIVisualEffect* BackdropEffect() {
-  UIGlassEffect* glass = [UIGlassEffect effectWithStyle:UIGlassEffectStyleRegular];
-  glass.tintColor = [UIColor colorWithWhite:0.0 alpha:0.7];
-  return glass;
+  if (@available(iOS 26.0, *)) {
+    UIGlassEffect* glass = [UIGlassEffect effectWithStyle:UIGlassEffectStyleRegular];
+    glass.tintColor = [UIColor colorWithWhite:0.0 alpha:0.7];
+    return glass;
+  }
+  return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterialDark];
 }
 
 // The explanation and the icon: dimmer than the title, brighter than the system's

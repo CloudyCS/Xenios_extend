@@ -3,10 +3,12 @@ set(CMAKE_TRY_COMPILE_CONFIGURATION Release)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
   set(XE_PLATFORM_IOS TRUE)
-  set(CMAKE_OSX_DEPLOYMENT_TARGET "26.0" CACHE STRING "Minimum iOS version")
-  # XeniOS supports iOS 26 and later. Raise a build dir configured earlier.
-  if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS 26.0)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "26.0" CACHE STRING "Minimum iOS version" FORCE)
+  # Set the default before project() so Apple's toolchain applies it to every
+  # language and linked target. A caller may request a newer minimum, but not
+  # one below the supported iOS 18 floor.
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "18.0" CACHE STRING "Minimum iOS version")
+  if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS 18.0)
+    message(FATAL_ERROR "XeniOS for iOS requires iOS 18.0 or later (got ${CMAKE_OSX_DEPLOYMENT_TARGET}).")
   endif()
 endif()
 

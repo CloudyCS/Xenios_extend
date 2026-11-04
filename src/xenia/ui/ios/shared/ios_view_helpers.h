@@ -60,10 +60,8 @@ void XEConfigureDestinationPresentation(UINavigationController* navigation_contr
 // `-[UIVisualEffectView initWithEffect:]` which retains it.
 //
 // On iOS 26+ this returns a `UIGlassEffect` (regular or clear variant per
-// `clear_variant`). On iOS 18-25 the fallback is
-// `UIBlurEffectStyleSystemMaterial` regardless of `clear_variant` —
-// pre-iOS-26 callers see the same backdrop they got before this helper
-// existed.
+// `clear_variant`). On iOS 18-25 it falls back to system material blur; the
+// clear variant uses the thinner material.
 UIVisualEffect* xe_make_chrome_visual_effect(BOOL clear_variant);
 
 // Configures `view` with the standard floating-window styling used across the

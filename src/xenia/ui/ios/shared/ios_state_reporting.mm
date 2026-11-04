@@ -10,10 +10,16 @@
 #import "xenia/ui/ios/shared/ios_state_reporting.h"
 
 #import <Foundation/Foundation.h>
-// Weak-linked: the framework is new in iOS 27, the app runs on 26.
+// Optional SDK support: the framework was introduced after the iOS 18 minimum.
+#if __has_include(<StateReporting/StateReporting.h>)
 #import <StateReporting/StateReporting.h>
+#define XE_IOS_STATE_REPORTING_SDK_AVAILABLE 1
+#else
+#define XE_IOS_STATE_REPORTING_SDK_AVAILABLE 0
+#endif
 
 void xe_ios_state_reporting_note_title(uint32_t title_id) {
+#if XE_IOS_STATE_REPORTING_SDK_AVAILABLE
   if (@available(iOS 27.0, *)) {
     @autoreleasepool {
       // Rare (a game starting or ending), far below the rate limit.
@@ -29,4 +35,7 @@ void xe_ios_state_reporting_note_title(uint32_t title_id) {
                             volatileMetadata:nil];
     }
   }
+#else
+  (void)title_id;
+#endif
 }
