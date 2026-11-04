@@ -1,0 +1,162 @@
+name: iOS unsigned IPA
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The iPhoneOS build needs Apple's arm64 converter library, separate from the
+  # macOS host library downloaded by `./xenia-build.py msc`.
+  MSC_IOS_REPO: xenios-jp/metal-shader-converter
+  MSC_IOS_RELEASE_TAG: ios-4.0.3
+  MSC_IOS_SHA256: bd6b729dcbde133a511d95130eb4d287a1e18b4170453f8b350e78a20bfc37aa
+
+jobs:
+  build-ios:
+    name: Build unsigned iOS 18 IPA
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Set up Python 3.12 and Mesa build dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Mesa build dependencies
+        run: python -m pip install --upgrade meson mako pyyaml packaging
+
+      - name: Download shader compiler dependencies
+        run: |
+          set -euo pipefail
+          ./xb slang
+          ./xenia-build.py msc
+
+      - name: Show Apple toolchain and install Metal Toolchain
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphoneos --show-sdk-path
+          for attempt in 1 2 3 4 5; do
+            if sudo xcodebuild -downloadComponent MetalToolchain; then
+              break
+            fi
+            if [[ "$attempt" -eq 5 ]]; then
+              echo 'error: Metal Toolchain download failed after 5 attempts' >&2
+              exit 1
+            fi
+            delay=$((attempt * 30))
+            echo "Metal Toolchain download attempt $attempt failed; retrying in ${delay}s"
+            sleep "$delay"
+          done
+
+      - name: Download iPhoneOS Metal Shader Converter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/msc-ios"
+          gh release download "$MSC_IOS_RELEASE_TAG" --repo "$MSC_IOS_REPO" \
+            --pattern libmetalirconverter.dylib \
+            --dir "$RUNNER_TEMP/msc-ios" --clobber
+          dylib="$RUNNER_TEMP/msc-ios/libmetalirconverter.dylib"
+          echo "$MSC_IOS_SHA256  $dylib" | shasum -a 256 -c -
+          lipo -verify_arch arm64 "$dylib"
+          msc_build_info="$(xcrun vtool -show-build "$dylib")"
+          grep -q 'platform IOS' <<<"$msc_build_info" || {
+            echo 'error: Metal Shader Converter binary is not built for iPhoneOS' >&2
+            exit 1
+          }
+          python - "$msc_build_info" <<'PY'
+          import re
+          import sys
+
+          match = re.search(r"^\s*minos\s+(\d+(?:\.\d+)*)", sys.argv[1], re.MULTILINE)
+          if not match or tuple(map(int, match.group(1).split("."))) > (18, 0):
+              raise SystemExit("error: embedded Metal Shader Converter requires newer than iOS 18")
+          PY
+          echo "MSC_IOS_LIBRARY=$dylib" >> "$GITHUB_ENV"
+
+      - name: Fetch submodules and Xenia data repositories
+        run: |
+          set -euo pipefail
+          # DXC is not used by the Metal path; Mesa provides SPIR-V-to-DXIL.
+          git submodule update --init --depth=1 -j"$(sysctl -n hw.ncpu)" \
+            $(grep -oE 'path = .+' .gitmodules | sed 's/path = //' \
+              | grep -v 'DirectXShaderCompiler')
+          # Keep the vendored wxWidgets submodules initialized for a clean configure.
+          git submodule update --init --recursive --depth=1 \
+            -j"$(sysctl -n hw.ncpu)" third_party/wxWidgets
+          ./xenia-build.py fetchdata
+
+      - name: Build native macOS shader compiler
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-host -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-host --target xenia-shader-cc
+          tool="$(find build-host -type f -name xenia-shader-cc -perm -u+x -print -quit)"
+          test -n "$tool"
+          echo "XENIA_SHADER_CC=$GITHUB_WORKSPACE/$tool" >> "$GITHUB_ENV"
+
+      - name: Configure iPhoneOS arm64 with Ninja Multi-Config
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-ios -G 'Ninja Multi-Config' \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0 \
+            -DCMAKE_CONFIGURATION_TYPES=Release \
+            -DXENIA_IOS_DISABLE_CODE_SIGNING=ON \
+            -DXENIA_IOS_CRASH_REPORTER=OFF \
+            -DXENIA_BUILD_IOS_TRACE_APP=OFF \
+            -DXENIA_IOS_COMPATIBILITY_DATA_DIR="$GITHUB_WORKSPACE/build/data_repos/game-compatibility" \
+            -DXENIA_IOS_HOST_SHADER_COMPILER="$XENIA_SHADER_CC" \
+            -DXENIA_IOS_SHADER_CONVERTER_LIBRARY="$MSC_IOS_LIBRARY"
+
+      - name: Build the iOS app bundle
+        run: |
+          set -euo pipefail
+          cmake --build build-ios --config Release --target xenia-app
+          app_bundle=build-ios/bin/iOS/Release/XeniOS.app
+          test -d "$app_bundle"
+          lipo -verify_arch arm64 "$app_bundle/XeniOS"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app_bundle/Info.plist")" = "18.0"
+          test -f "$app_bundle/Frameworks/libmetalirconverter.dylib"
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          app_bundle=build-ios/bin/iOS/Release/XeniOS.app
+          ipa=artifacts/XeniOS-iOS18-unsigned.ipa
+          /bin/bash tools/package_ios_ipa_unsigned.sh "$app_bundle" "$ipa"
+          unzip -t "$ipa"
+          unzip -Z1 "$ipa" | grep -qx 'Payload/XeniOS.app/Info.plist'
+          unzip -Z1 "$ipa" | grep -qx 'Payload/XeniOS.app/XeniOS'
+          if unzip -Z1 "$ipa" | grep -q 'embedded.mobileprovision$'; then
+            echo 'error: unsigned IPA unexpectedly contains a provisioning profile' >&2
+            exit 1
+          fi
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: xenios-ios18-unsigned-ipa
+          path: artifacts/XeniOS-iOS18-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

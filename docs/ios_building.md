@@ -4,9 +4,9 @@ The repository's iOS app is built with its existing CMake graph, C++/Objective-C
 
 ## Build through GitHub Actions
 
-The iOS job is part of `.github/workflows/build.yml` and runs on a push to `main` or from **Actions → Build (reusable) → Run workflow**. Download the `xenios-ios18-unsigned-ipa` artifact from the completed workflow run. The job configures `CMAKE_OSX_DEPLOYMENT_TARGET=18.0`, turns off the optional iOS 27 crash-reporter extension and Xcode target signing, builds `xenia-app-ios-unsigned-package`, and checks the IPA's bundle metadata, arm64 executable, embedded Metal Shader Converter library, and archive contents. With the Ninja generator, no signing commands are part of the build graph.
+The focused workflow is `.github/workflows/ios-unsigned.yml`; run it from **Actions → iOS unsigned IPA → Run workflow** or push to `main`. Download the `xenios-ios18-unsigned-ipa` artifact from the completed workflow run. The app bundle is produced by the exact CMake target `xenia-app`; the workflow configures `Ninja Multi-Config`, iPhoneOS, arm64, and `CMAKE_OSX_DEPLOYMENT_TARGET=18.0`, disables the optional iOS 27 crash-reporter extension and app-target signing, then packages the bundle. It checks the IPA's bundle metadata, arm64 executable, embedded Metal Shader Converter library, and archive contents. With the Ninja generator, no signing commands are part of the build graph.
 
-The workflow still needs Apple's iPhoneOS SDK, `xcrun actool` for the asset catalog, the Metal toolchain, and the project's pinned shader tools and external data. These steps run on macOS; this workflow does not provide a Linux-only iOS compiler.
+The workflow runs `./xenia-build.py fetchdata`, which supplies the game patches, SDL controller database, x360db data, and compatibility data required by the app target. Repository assets and icon catalogs are included by CMake; `cmake/ios/Assets.cmake` invokes `xcrun actool` during the build. The workflow also needs Apple's iPhoneOS SDK, the Metal toolchain, Slang, a native `xenia-shader-cc`, the macOS Metal Shader Converter from `./xenia-build.py msc`, and a separate arm64 iPhoneOS Metal Shader Converter library. These steps run on macOS; this workflow does not provide a Linux-only iOS compiler.
 
 ## What unsigned means
 
